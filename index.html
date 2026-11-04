@@ -18,12 +18,12 @@
   <!-- inactiveTitle -->
   
 
-  <title>《-biubiu-⊂(`ω´∩)</title>
+  <title>知行合一，止于至善</title>
   <!-- 注入配置到全局变量 -->
   <script>
     window.SITE_CONFIG = {
       root: '/',
-      activeTitle: '《-biubiu-⊂(`ω´∩)',
+      activeTitle: '知行合一，止于至善',
       inactiveTitle: '|ω･`)暗中观察',
       gsap: {"enable":true,"entrance_stagger":0.08,"scroll_trigger":true,"parallax":true,"hover_effect":true}
     };
@@ -72,10 +72,6 @@
       
       <li>
         <a href="/posts">文章</a>
-      </li>
-      
-      <li>
-        <a href="/stats">统计</a>
       </li>
       
       <li>
@@ -146,15 +142,6 @@
     <footer class="footer-container">
   <div class="footer-content">
     <p class="footer-text">
-      © 2026
-      <a href="https://github.com/yiyuan1x1-wq" target="_blank">Yiyuan</a>.
-      All Rights Reserved.
-    </p>
-    <p class="footer-text">
-      Powered by <a href="https://hexo.io" target="_blank">Hexo</a> | Theme by 
-      <a href="https://github.com/asukacc/YoruKumo" target="_blank">YoruKumo</a>
-    </p>
-    <p class="footer-text">
       <span>本站已运行</span>
       <span id="runtime" class="runtime-badge"></span>
     </p>
@@ -163,11 +150,13 @@
 
 <script>
   function calculateRuntime() {
-    // 网站开始运行的时间，格式：年-月-日
-    const startTime = new Date('Wed Jan 01 2025 08:00:00 GMT+0800 (香港标准时间)');
+    // 网站开始运行的时间，由 theme.footer.since 提供
+    const startTime = new Date('2026-11-04T19:53:00+08:00');
     const currentTime = new Date();
 
-    const timeDiff = currentTime - startTime;
+    let timeDiff = currentTime - startTime;
+    if (!isFinite(timeDiff) || timeDiff < 0) timeDiff = 0;
+
     const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
     const hours = Math.floor(
       (timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
@@ -190,8 +179,6 @@
   // 每秒更新一次
   setInterval(calculateRuntime, 1000);
 </script>
-
-
     <div class="to-top">
   <svg class="icon" aria-hidden="true">
     <use xlink:href="#icon-arrowup"></use>
