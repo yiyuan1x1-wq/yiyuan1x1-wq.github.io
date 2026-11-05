@@ -229,24 +229,16 @@
       return { w: w * CELL, h: h * CELL, ring: collect(ring), body: collect(body), crown: collect(hat) };
     }
 
-    // ---- 奔跑（两帧：前后肢交替）----
-    function runPose(phase) {
+    // ---- 奔跑（单帧静态姿势，不做交替动画）----
+    function runPose() {
       return build(16, 22, function (g, c) {
         disc(g, 8, 5.2, 2.6);
         crown(c, 8, 2);
         poly(g, [[8, 8.0], [8.2, 9.4], [8.4, 13.2]], 1.0); // 脖子 + 躯干
-
-        if (phase === 0) {
-          poly(g, [[8.4, 9.6], [11.2, 9.2], [13.4, 7.0]], 1.0); // 前臂向前上
-          poly(g, [[7.9, 9.8], [5.2, 11.2], [3.4, 13.6]], 1.0); // 后臂向后下
-          poly(g, [[8.6, 13.2], [10.8, 15.4], [11.9, 18.3], [13.7, 19.1]], 1.0); // 前腿
-          poly(g, [[8.2, 13.2], [6.3, 15.8], [5.0, 18.6], [3.1, 19.8]], 1.0); // 后腿
-        } else {
-          poly(g, [[8.4, 9.6], [5.0, 11.4], [3.4, 13.6]], 1.0); // 前臂向后下
-          poly(g, [[7.9, 9.8], [10.4, 9.2], [13.0, 7.2]], 1.0); // 后臂向前上
-          poly(g, [[8.5, 13.2], [7.3, 15.9], [6.6, 18.7], [4.9, 19.9]], 1.0); // 腿收拢
-          poly(g, [[8.3, 13.2], [9.7, 15.8], [10.5, 18.7], [12.3, 19.7]], 1.0);
-        }
+        poly(g, [[8.4, 9.6], [11.2, 9.2], [13.4, 7.0]], 1.0); // 前臂向前上
+        poly(g, [[7.9, 9.8], [5.2, 11.2], [3.4, 13.6]], 1.0); // 后臂向后下
+        poly(g, [[8.6, 13.2], [10.8, 15.4], [11.9, 18.3], [13.7, 19.1]], 1.0); // 前腿
+        poly(g, [[8.2, 13.2], [6.3, 15.8], [5.0, 18.6], [3.1, 19.8]], 1.0); // 后腿
       });
     }
 
@@ -276,8 +268,7 @@
     }
 
     var poses = {
-      runA: runPose(0),
-      runB: runPose(1),
+      run: runPose(), // 静态奔跑姿势（不做两帧交替）
       jump: jumpPose(),
       duck: duckPose()
     };
@@ -314,7 +305,7 @@
       var pose;
       if (ducking) pose = PixelArt.poses.duck;
       else if (!player.onGround) pose = PixelArt.poses.jump;
-      else pose = Math.floor(player.runPhase) % 2 === 0 ? PixelArt.poses.runA : PixelArt.poses.runB;
+      else pose = PixelArt.poses.run;
 
       var boxW = ducking ? Config.PLAYER_DUCK_W : Config.PLAYER_W;
       var x = Math.round(player.x + (boxW - pose.w) / 2);
@@ -435,7 +426,6 @@
     this.onGround = true;
     this.ducking = false;
     this.duckFrames = 0;
-    this.runPhase = 0;
   };
 
   Player.prototype.jump = function () {
@@ -456,8 +446,7 @@
     }
   };
 
-  Player.prototype.update = function (timeScale, speed) {
-    this.runPhase += speed * timeScale * 0.06;
+  Player.prototype.update = function (timeScale) {
 
     if (!this.onGround) {
       this.vy += Config.GRAVITY * timeScale;
@@ -881,7 +870,7 @@
     var avgSpeed = (speedBefore + this.speed) / 2;
 
     var diff = this.difficulty();
-    this.player.update(timeScale, this.speed);
+    this.player.update(timeScale);
     this.background.update(timeScale, this.speed);
     this.obstacles.update(timeScale, this.speed, diff);
 
