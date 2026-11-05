@@ -630,6 +630,7 @@
     this.frames = 0;
     this.lastTime = 0;
     this.scale = 1;
+    this.visible = true;
     this.colors = this.readColors();
     this.boundTick = this.tick.bind(this);
 
@@ -648,6 +649,21 @@
         if (global.document.hidden) self.lastTime = 0; // 切回前台时避免巨大步进
       });
     }
+    // 滚出视口时暂停渲染（IntersectionObserver 不可用时保持常开）
+    if (global.IntersectionObserver) {
+      try {
+        this.observer = new global.IntersectionObserver(
+          function (entries) {
+            self.setVisible(entries[0] ? entries[0].isIntersecting : true);
+          },
+          { threshold: 0 }
+        );
+        this.observer.observe(canvas);
+      } catch (e) {
+        this.observer = null;
+      }
+    }
+
     global.requestAnimationFrame(this.boundTick);
   }
 
@@ -773,6 +789,15 @@
     Assets.drawPlayer(ctx, this.player, this.colors);
   };
 
+  /**
+   * 可见性开关：滚出视口后停止渲染与推进（省电，也不会在用户看文章时白跑 60fps）。
+   * 由 IntersectionObserver 调用；不支持该 API 的环境始终视为可见。
+   */
+  Runner.prototype.setVisible = function (visible) {
+    this.visible = !!visible;
+    if (!this.visible) this.lastTime = 0;
+  };
+
   Runner.prototype.tick = function (now) {
     var dtMs = this.lastTime ? now - this.lastTime : 1000 / 60;
     this.lastTime = now;
@@ -780,8 +805,10 @@
     dtMs = clamp(dtMs, 0, 60);
     var timeScale = dtMs / (1000 / 60);
 
-    if (this.state === STATE.RUNNING) this.update(timeScale);
-    this.render();
+    if (this.visible) {
+      if (this.state === STATE.RUNNING) this.update(timeScale);
+      this.render();
+    }
 
     global.requestAnimationFrame(this.boundTick);
   };
