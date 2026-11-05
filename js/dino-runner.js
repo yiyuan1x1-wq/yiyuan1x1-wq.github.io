@@ -1,11 +1,12 @@
 /*!
- * dino-runner.js — 可离线运行的 2D 小恐龙跑酷（原生 Canvas，零外部依赖）
+ * dino-runner.js — 可离线运行的 2D 像素跑酷（原生 Canvas，零外部依赖）
+ * 主角：像素火柴人（黑身 + 荧光绿描边 + 黄王冠，纯栅格化生成）
  * ------------------------------------------------------------------
  * 设计要点（对应技术规格）：
  *   1. 原生 HTML5 + Vanilla JS，不使用任何框架，不发任何网络请求；
  *   2. Canvas 渲染 + requestAnimationFrame 主循环；
  *   3. Delta Time 归一化：所有位移乘 timeScale，60Hz / 144Hz 手感一致；
- *   4. 几何绘制素材（无外部图片 / 字体 / 音频）；
+ *   4. 栅格化像素素材（无外部图片 / 字体 / 音频）；
  *   5. 公平生成：间距由「滞空帧数」反推，保证任何速度下都能跳过去；
  *   6. 最高分写入 localStorage，读写失败自动降级。
  */
@@ -30,9 +31,9 @@
 
     // 玩家
     PLAYER_X: 64,
-    PLAYER_W: 42,
+    PLAYER_W: 30,
     PLAYER_H: 46,
-    PLAYER_DUCK_W: 50,
+    PLAYER_DUCK_W: 44,
     PLAYER_DUCK_H: 30,
     DUCK_MIN_FRAMES: 26, // 一次下蹲至少需要的帧数（用于安全间距）
 
@@ -112,92 +113,213 @@
   // ================================================================
   // 3. 素材（纯几何绘制，无外部图片）
   // ================================================================
-  var Assets = {
-    // 恐龙：脚底坐标 (x, y)，朝右
-    drawPlayer: function (ctx, player, colors) {
-      var x = player.x;
-      var y = player.y;
-      var ducking = player.ducking && player.onGround;
-      var phase = Math.floor(player.runPhase) % 2;
-      var lift = player.onGround ? (phase === 0 ? 0 : 3) : 0;
 
-      ctx.save();
-      ctx.fillStyle = colors.ink;
-      ctx.strokeStyle = colors.ink;
-      ctx.lineWidth = 2;
-      ctx.lineJoin = 'round';
+  // ================================================================
+  // 3.5 像素风火柴人（栅格化生成，无外部图片）
+  //     造型：黑色身体 + 荧光绿描边 + 黄色小皇冠；黑色部分跟随主题文字色
+  // ================================================================
+  var PixelArt = (function () {
+    var CELL = 2; // 每个“像素块”= 2 个逻辑像素
 
-      if (ducking) {
-        // ---- 下蹲姿态：贴地、拉长，碰撞箱变矮 ----
-        // 尾巴
-        ctx.beginPath();
-        ctx.moveTo(x + 4, y - 16);
-        ctx.lineTo(x - 12, y - 22);
-        ctx.lineTo(x - 2, y - 8);
-        ctx.closePath();
-        ctx.fill();
+    function grid(w, h) {
+      var rows = [];
+      for (var y = 0; y < h; y++) {
+        var row = [];
+        for (var x = 0; x < w; x++) row.push(0);
+        rows.push(row);
+      }
+      return rows;
+    }
 
-        // 身体
-        roundRect(ctx, x, y - 26, 40, 20, 9);
-        ctx.fill();
+    function distSeg(px, py, x1, y1, x2, y2) {
+      var dx = x2 - x1;
+      var dy = y2 - y1;
+      var len2 = dx * dx + dy * dy;
+      var t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      var cx = x1 + dx * t;
+      var cy = y1 + dy * t;
+      var ex = px - cx;
+      var ey = py - cy;
+      return Math.sqrt(ex * ex + ey * ey);
+    }
 
-        // 后腿
-        roundRect(ctx, x + 4, y - 10, 8, 10, 3);
-        ctx.fill();
+    // 粗线段（cell 坐标）
+    function line(g, x1, y1, x2, y2, thickness) {
+      var r = Math.max(0.42, thickness / 2);
+      var y0 = Math.max(0, Math.floor(Math.min(y1, y2) - r));
+      var y1c = Math.min(g.length - 1, Math.ceil(Math.max(y1, y2) + r));
+      var x0 = Math.max(0, Math.floor(Math.min(x1, x2) - r));
+      var x1c = Math.min(g[0].length - 1, Math.ceil(Math.max(x1, x2) + r));
+      for (var y = y0; y <= y1c; y++) {
+        for (var x = x0; x <= x1c; x++) {
+          if (distSeg(x + 0.5, y + 0.5, x1, y1, x2, y2) <= r) g[y][x] = 1;
+        }
+      }
+    }
 
-        // 头（前伸）
-        roundRect(ctx, x + 30, y - 30, 20, 17, 7);
-        ctx.fill();
+    // 折线
+    function poly(g, pts, thickness) {
+      for (var i = 0; i < pts.length - 1; i++) {
+        line(g, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], thickness);
+      }
+    }
 
-        // 眼睛
-        ctx.fillStyle = colors.bg;
-        ctx.beginPath();
-        ctx.arc(x + 44, y - 23, 2.6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = colors.ink;
-        ctx.beginPath();
-        ctx.arc(x + 44.8, y - 23.4, 1.3, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        // ---- 站立 / 跳跃姿态 ----
-        // 尾巴
-        ctx.beginPath();
-        ctx.moveTo(x + 8, y - 26);
-        ctx.lineTo(x - 14, y - 34);
-        ctx.lineTo(x + 2, y - 14);
-        ctx.closePath();
-        ctx.fill();
+    function disc(g, cx, cy, r) {
+      for (var y = 0; y < g.length; y++) {
+        for (var x = 0; x < g[0].length; x++) {
+          var dx = x + 0.5 - cx;
+          var dy = y + 0.5 - cy;
+          if (dx * dx + dy * dy <= r * r) g[y][x] = 1;
+        }
+      }
+    }
 
-        // 身体
-        roundRect(ctx, x + 2, y - 34, 30, 24, 10);
-        ctx.fill();
+    function block(g, x1, y1, x2, y2) {
+      for (var y = Math.max(0, y1); y <= Math.min(g.length - 1, y2); y++) {
+        for (var x = Math.max(0, x1); x <= Math.min(g[0].length - 1, x2); x++) g[y][x] = 1;
+      }
+    }
 
-        // 腿（两帧交替，形成跑步节奏）
-        roundRect(ctx, x + 7, y - 13 - lift, 8, 13 + lift, 3);
-        ctx.fill();
-        roundRect(ctx, x + 20, y - 13 - (3 - lift), 8, 13 + (3 - lift), 3);
-        ctx.fill();
+    // 王冠：冠带 + 三个尖角，cx 为水平中心，baseY 为冠带最下一行
+    function crown(c, cx, baseY) {
+      block(c, cx - 2, baseY - 1, cx + 2, baseY);
+      block(c, cx - 2, baseY - 2, cx - 2, baseY - 2);
+      block(c, cx, baseY - 2, cx, baseY - 2);
+      block(c, cx + 2, baseY - 2, cx + 2, baseY - 2);
+    }
 
-        // 脖子 / 头
-        roundRect(ctx, x + 24, y - 47, 21, 19, 7);
-        ctx.fill();
+    // 合成「绿描边 + 黑身 + 黄冠」
+    function build(w, h, painter) {
+      var body = grid(w, h);
+      var hat = grid(w, h);
+      painter(body, hat);
 
-        // 小短手
-        roundRect(ctx, x + 28, y - 30, 10, 5, 2);
-        ctx.fill();
-
-        // 眼睛
-        ctx.fillStyle = colors.bg;
-        ctx.beginPath();
-        ctx.arc(x + 38, y - 40, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = colors.ink;
-        ctx.beginPath();
-        ctx.arc(x + 38.8, y - 40.4, 1.5, 0, Math.PI * 2);
-        ctx.fill();
+      // 描边只跟随黑色身体（王冠保持纯黄色，更有辨识度）
+      var ring = grid(w, h);
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          if (body[y][x] || hat[y][x]) continue;
+          var hit = false;
+          for (var dy = -1; dy <= 1 && !hit; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+              var nx = x + dx;
+              var ny = y + dy;
+              if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+              if (body[ny][nx]) {
+                hit = true;
+                break;
+              }
+            }
+          }
+          if (hit) ring[y][x] = 1;
+        }
       }
 
-      ctx.restore();
+      function collect(src) {
+        var out = [];
+        for (var yy = 0; yy < h; yy++) {
+          for (var xx = 0; xx < w; xx++) {
+            if (src[yy][xx]) out.push([xx * CELL, yy * CELL]);
+          }
+        }
+        return out;
+      }
+
+      return { w: w * CELL, h: h * CELL, ring: collect(ring), body: collect(body), crown: collect(hat) };
+    }
+
+    // ---- 奔跑（两帧：前后肢交替）----
+    function runPose(phase) {
+      return build(16, 22, function (g, c) {
+        disc(g, 8, 5.2, 2.6);
+        crown(c, 8, 2);
+        poly(g, [[8, 8.0], [8.2, 9.4], [8.4, 13.2]], 1.0); // 脖子 + 躯干
+
+        if (phase === 0) {
+          poly(g, [[8.4, 9.6], [11.2, 9.2], [13.4, 7.0]], 1.0); // 前臂向前上
+          poly(g, [[7.9, 9.8], [5.2, 11.2], [3.4, 13.6]], 1.0); // 后臂向后下
+          poly(g, [[8.6, 13.2], [10.8, 15.4], [11.9, 18.3], [13.7, 19.1]], 1.0); // 前腿
+          poly(g, [[8.2, 13.2], [6.3, 15.8], [5.0, 18.6], [3.1, 19.8]], 1.0); // 后腿
+        } else {
+          poly(g, [[8.4, 9.6], [5.0, 11.4], [3.4, 13.6]], 1.0); // 前臂向后下
+          poly(g, [[7.9, 9.8], [10.4, 9.2], [13.0, 7.2]], 1.0); // 后臂向前上
+          poly(g, [[8.5, 13.2], [7.3, 15.9], [6.6, 18.7], [4.9, 19.9]], 1.0); // 腿收拢
+          poly(g, [[8.3, 13.2], [9.7, 15.8], [10.5, 18.7], [12.3, 19.7]], 1.0);
+        }
+      });
+    }
+
+    // ---- 跳跃（双腿收起、双臂上扬）----
+    function jumpPose() {
+      return build(16, 22, function (g, c) {
+        disc(g, 8, 5.2, 2.6);
+        crown(c, 8, 2);
+        poly(g, [[8, 8.0], [8.2, 9.4], [8.4, 13.0]], 1.0);
+        poly(g, [[8.4, 9.6], [5.6, 8.4], [4.2, 6.0]], 1.0);
+        poly(g, [[7.9, 9.8], [10.4, 8.4], [12.4, 6.2]], 1.0);
+        poly(g, [[8.6, 13.0], [10.5, 14.9], [12.4, 15.5]], 1.0);
+        poly(g, [[8.2, 13.0], [6.3, 14.7], [4.5, 14.3]], 1.0);
+      });
+    }
+
+    // ---- 下蹲（横向压缩）----
+    function duckPose() {
+      return build(22, 13, function (g, c) {
+        disc(g, 16.4, 5.4, 2.6);
+        crown(c, 16, 2);
+        poly(g, [[14.4, 7.4], [10.6, 8.2], [7.4, 8.8]], 1.1); // 躯干贴地
+        poly(g, [[12.2, 7.8], [10.3, 10.3], [11.7, 11.7]], 1.0); // 手撑地
+        poly(g, [[8.4, 8.9], [6.2, 10.9], [3.7, 12.2]], 1.0); // 收腿
+        poly(g, [[8.7, 9.1], [7.1, 11.3], [4.9, 12.5]], 1.0);
+      });
+    }
+
+    var poses = {
+      runA: runPose(0),
+      runB: runPose(1),
+      jump: jumpPose(),
+      duck: duckPose()
+    };
+
+    function paint(ctx, cells, x, y) {
+      if (!cells.length) return;
+      ctx.beginPath();
+      for (var i = 0; i < cells.length; i++) {
+        ctx.rect(x + cells[i][0], y + cells[i][1], CELL, CELL);
+      }
+      ctx.fill();
+    }
+
+    return {
+      CELL: CELL,
+      poses: poses,
+      draw: function (ctx, pose, x, y, colors) {
+        ctx.save();
+        ctx.fillStyle = colors.green;
+        paint(ctx, pose.ring, x, y);
+        ctx.fillStyle = colors.ink;
+        paint(ctx, pose.body, x, y);
+        ctx.fillStyle = colors.crown;
+        paint(ctx, pose.crown, x, y);
+        ctx.restore();
+      }
+    };
+  })();
+
+  var Assets = {
+    // 玩家：像素风火柴人（脚底居中于碰撞箱）
+    drawPlayer: function (ctx, player, colors) {
+      var ducking = player.ducking && player.onGround;
+      var pose;
+      if (ducking) pose = PixelArt.poses.duck;
+      else if (!player.onGround) pose = PixelArt.poses.jump;
+      else pose = Math.floor(player.runPhase) % 2 === 0 ? PixelArt.poses.runA : PixelArt.poses.runB;
+
+      var boxW = ducking ? Config.PLAYER_DUCK_W : Config.PLAYER_W;
+      var x = Math.round(player.x + (boxW - pose.w) / 2);
+      var y = Math.round(player.y - pose.h);
+      PixelArt.draw(ctx, pose, x, y, colors);
     },
 
     // 地面仙人掌：脚底贴地
@@ -335,7 +457,7 @@
   };
 
   Player.prototype.update = function (timeScale, speed) {
-    this.runPhase += speed * timeScale * 0.08;
+    this.runPhase += speed * timeScale * 0.06;
 
     if (!this.onGround) {
       this.vy += Config.GRAVITY * timeScale;
@@ -671,7 +793,9 @@
     return {
       ink: cssVar('--text-color', '#171717'),
       muted: cssVar('--secondary-text-color', '#6f6f6f'),
-      bg: cssVar('--secondary-color', '#ffffff')
+      bg: cssVar('--secondary-color', '#ffffff'),
+      green: '#4ade80', // 像素描边（荧光绿）
+      crown: '#f5b81c' // 皇冠（黄）
     };
   };
 
@@ -751,7 +875,10 @@
 
   Runner.prototype.update = function (timeScale) {
     this.frames += timeScale;
+    var speedBefore = this.speed;
     this.speed = clamp(this.speed + Config.ACCELERATION * timeScale, Config.INITIAL_SPEED, Config.MAX_SPEED);
+    // 用梯形积分（帧内平均速度）累加分数，保证 60Hz / 144Hz 结果一致
+    var avgSpeed = (speedBefore + this.speed) / 2;
 
     var diff = this.difficulty();
     this.player.update(timeScale, this.speed);
@@ -759,7 +886,7 @@
     this.obstacles.update(timeScale, this.speed, diff);
 
     // 分数：随距离增长，速度越快增长越快
-    this.score += this.speed * timeScale * (Config.SCORE_RATE + Config.SCORE_SPEED_BONUS * diff);
+    this.score += avgSpeed * timeScale * (Config.SCORE_RATE + Config.SCORE_SPEED_BONUS * diff);
 
     // 碰撞（AABB）
     var pb = this.player.box();
@@ -836,7 +963,8 @@
       Runner: Runner,
       Config: Config,
       STATE: STATE,
-      version: '1.0.0'
+      version: '1.1.0',
+      PixelArt: PixelArt
     };
   }
 
